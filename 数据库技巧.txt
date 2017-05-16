@@ -100,7 +100,7 @@ where (u_id,kills) in (select u_id,max(kills) from user1_kills group by u_id);
 
 4、多值查询
 
-同一属性列中满足多个条件的查询
+同一属性列中满足多个条件的查询--01
 
 mysql> select * from user1;
 +----+-----------+
@@ -142,4 +142,93 @@ select name , a.k_date ,b.k_date
 from user1 as u join user1_kills as a on u.id=a.u_id  and a.k_date='2017-02-03'
 	join user1_kills as  b on b.u_id=u.id and b.k_date='2017-02-04';
 
+同一属性列中满足多个条件的查询--01
 
+sql语句：
+select name  
+from (select name,k_date from user1 as u join user1_kills a on a.u_id=u.id ) as t 
+where k_date in ('2017-02-03','2017-02-04') 
+group oup by name;
+
+结果：
++-----------+
+| name      |
++-----------+
+| 唐僧      |
+| 猪八戒    |
++-----------+
+
+5、累进税计算
+
+salarys表：
+mysql> select * from salarys;
++----+------+----------+
+| id | u_id | salary   |
++----+------+----------+
+|  1 |    1 | 35000.00 |
+|  2 |    2 | 80000.00 |
+|  3 |    3 | 15000.00 |
+|  4 |    4 |  8000.00 |
++----+------+----------+
+
+user1表：
+mysql> select * from user1;
++----+-----------+
+| id | name      |
++----+-----------+
+|  4 | 沙僧      |
+|  1 | 孙悟空    |
+|  3 | 唐僧      |
+|  2 | 猪八戒    |
++----+-----------+
+
+税率表：
+mysql> select * from tax;
++----------+------------+------+
+| low      | high       | ttax |
++----------+------------+------+
+|     0.00 |    3000.00 | 0.00 |
+|  3000.00 |    5000.00 | 0.20 |
+|  5000.00 |   10000.00 | 0.23 |
+| 10000.00 |   20000.00 | 0.30 |
+| 20000.00 |   50000.00 | 0.35 |
+| 50000.00 |   80000.00 | 0.45 |
+| 80000.00 | 9999999.00 | 0.60 |
++----------+------------+------+
+
+求每个人需要上税的钱数：
+结果：
++-----------+----------+
+| name      | tax      |
++-----------+----------+
+| 唐僧      | 28550.00 |
+| 孙悟空    |  9800.00 |
+| 猪八戒    |  3050.00 |
+| 沙僧      |  1090.00 |
++-----------+----------+
+
+sql语句：
+select name,sum((least(high,salary)-low) * ttax) as tax
+from user1 as u join salarys as s on u.id=s.u_id 
+	left join tax as t on t.low<s.salary
+group by name
+order by tax desc;
+
+
+求每人税后工资：
+结果：
++-----------+----------+
+| name      | tax      |
++-----------+----------+
+| 唐僧      | 51450.00 |
+| 孙悟空    | 25200.00 |
+| 猪八戒    | 11950.00 |
+| 沙僧      |  6910.00 |
++-----------+----------+
+
+sql语句：
+select name,sum((least(high,salary)-low) * (1-ttax)) as tax
+from user1 as u join salarys as s on u.id=s.u_id 
+	left join tax as t on t.low<s.salary
+group by name
+order by tax desc;
