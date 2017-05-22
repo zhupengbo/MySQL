@@ -1,0 +1,183 @@
+
+数据库优化
+
+1、表优化和类型选择
+	1）定长表和非定长分离
+	2）常用字段和非常用字段分离
+	3）使用反范式化，即冗余
+	4）类型选择优先级 int > date,time > enum,char > varchar > text,blob
+		解释： date，time：存在时区问题
+				enum：底层使用int，多了一次转换过程
+				char：utf8下占用3字节
+				varchar，text，bolb非定长
+
+2、索引
+	1）btree索引：优点：查找复杂度为 O(log N)
+	2）hash索引：优点：查找复杂度为 O(1);缺点：只能用于memory引擎，不能优化范围查询，比如 where id>4
+	
+	索引误区：认为给每一个出现在where中的字段 添加索引可以优化查询
+		比如：select *  from goods where id>2 and price >5;认为只要给id和price分别加上索引就可以优化，错误，
+		结论：只有一个索引起作用
+		mysql> select * from goods;
+		+----+-----------+-------+
+		| id | name      | price |
+		+----+-----------+-------+
+		|  1 | milk      | 10.00 |
+		|  2 | bread     |  2.00 |
+		|  3 | ice-cream |  5.00 |
+		|  4 | chocolate | 19.00 |
+		+----+-----------+-------+
+
+		id为主键，自动有索引，name 未添加索引时：
+		mysql> desc select * from goods where id=2\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: goods
+   partitions: NULL
+         type: const
+possible_keys: PRIMARY
+          key: PRIMARY
+      key_len: 4		//key_len为4表示只有4字节用于索引，即id
+          ref: const
+         rows: 1		//查询次数为1
+     filtered: 100.00
+        Extra: NULL
+
+		添加 name 字段索引：
+		mysql> create index name_index on goods(name);
+		mysql> desc select * from goods where id=1 and name='milk'\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: goods
+   partitions: NULL
+         type: const
+possible_keys: PRIMARY,name_index
+          key: PRIMARY
+      key_len: 4		//还是4，表名 name 字段的索引并未起作用
+          ref: const
+         rows: 1
+     filtered: 100.00
+        Extra: NULL
+
+		
+	问题1.	需要建立联合索引，联合索引满足左前缀原则
+mysql> select * from index_test;
++----+----+----+----+
+| i1 | i2 | i3 | i4 |
++----+----+----+----+
+|  1 |  2 |  3 |  4 |
+|  2 |  3 |  4 |  5 |
+|  3 |  4 |  5 |  6 |
+|  4 |  5 |  6 |  7 |
++----+----+----+----+
+
+给i1,i2,i3,i4添加联合索引（i1,i2,i3,i4）,下列语句能用到索引分别是什么？
+
+a)	select * from index_test where i1=1 and i2=2 and i4=4 and i3=3
+b) select * from index_test where i1=1 and i2=2 and i4=4 order by i3
+c) select i2,i3 from index_test where i1=1 and i4=4 group by i3,i2
+d) select * from index_test where i1=1 order by i2,i3
+e) select * from index_test where i1=1 and i2=2 order by i2,i3
+
+
+解答：a)使用索引i1,i2,i3,i4。根据做左缀原则，i3没有用到之前，i4不会被用到，但是数据库会做一个优化，因为i4=4 and i3=3 等价于 i3=3 and i4=4
+mysql> desc select * from index_test where i1=1 and i2=2 and i4=4 and i3=3\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_test
+   partitions: NULL
+         type: ref
+possible_keys: index_all
+          key: index_all
+      key_len: 4		//索引字节为4
+          ref: const,const,const,const
+         rows: 1
+     filtered: 100.00
+        Extra: Using index
+		
+		b)使用索引i1，i2。对于查询并未使用到索引i3，所以不会使用i4
+		mysql> desc select * from index_test where i1=1 and i2=2 and i4=4 order by i3\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_test
+   partitions: NULL
+         type: ref
+possible_keys: index_all
+          key: index_all
+      key_len: 2		//表示i1，i2
+          ref: const,const
+         rows: 1
+     filtered: 25.00
+        Extra: Using where; Using index
+		
+		c)使用索引i1
+mysql> desc select i2,i3 from index_test where i1=1 and i4=4 group by i3,i2\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_test
+   partitions: NULL
+         type: ref
+possible_keys: index_all
+          key: index_all
+      key_len: 1		//i1
+          ref: const
+         rows: 1
+     filtered: 25.00
+        Extra: Using where; Using index; Using temporary; Using filesort
+
+		
+		d)使用索引i1
+		mysql> desc select * from index_test where i1=1 order by i2,i3\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_test
+   partitions: NULL
+         type: ref
+possible_keys: index_all
+          key: index_all
+      key_len: 1		//i1
+          ref: const
+         rows: 1
+     filtered: 100.00
+        Extra: Using where; Using index
+		
+		e)使用索引i1,i2
+		mysql> desc select * from index_test where i1=1 and i2=2 order by i2,i3\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_test
+   partitions: NULL
+         type: ref
+possible_keys: index_all
+          key: index_all
+      key_len: 2		//i1,i2
+          ref: const,const
+         rows: 1
+     filtered: 100.00
+        Extra: Using where; Using index
+
+		
+	问题2 ：在购物系统中对price建立了索引，为什么按价格查询效率还是很低？
+	解答：一般来说，价格需要跟物品分类建立联合索引，有可能该系统对种类建立了索引，而你按价格查询时，where条件时  catlog='xxx' and price=xxx，这时，只有catalog索引起作用
+	
+3、聚簇索引和非聚簇索引
+
+	都是btree
+	聚簇索引：innodb引擎，插入无序，输出有序
+	非聚簇索引：myisam引擎
+	索引覆盖
+	
+	聚簇索引：数据存在于主键索引的节点上；优点：不存在回行；缺点节点可能会变得沉重；页分裂；
+	非聚簇索引：索引树和数据分离
+	 
+	问题：
+	主键id，给id和name加索引，表中有字段是char(3000)，为什么select id,name from tb1 order by id慢，select id,name from tb order by id，name快？
+	解答：肯定是聚簇索引，当order by id，使用主键索引树，树节节点点沉重，导致速度低下；
+		当order by id,name 使用id，name索引树，并且查询字段索引覆盖，不会去查询主键索引树，节点只有id和name，效率高
