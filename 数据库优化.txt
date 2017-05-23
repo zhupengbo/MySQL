@@ -181,3 +181,116 @@ possible_keys: index_all
 	主键id，给id和name加索引，表中有字段是char(3000)，为什么select id,name from tb1 order by id慢，select id,name from tb order by id，name快？
 	解答：肯定是聚簇索引，当order by id，使用主键索引树，树节节点点沉重，导致速度低下；
 		当order by id,name 使用id，name索引树，并且查询字段索引覆盖，不会去查询主键索引树，节点只有id和name，效率高
+		
+4、索引
+
+	1)如何选择索引？
+	解答：频繁查询、区分度高、长度小、尽可能覆盖常用字段
+	
+	2)多列索引需要注意什么？
+	解答：根据查询习惯选择索引顺序
+	
+	3)左前缀原则不易区分的情况下，怎么选择索引？
+	反序、伪哈希
+	示例：
+	mysql> select * from urls;
++----+-----------------+------------+
+| id | url             | crcurl     |
++----+-----------------+------------+
+|  1 | www.baidu.com   |  387695885 |
+|  2 | www.souhu.com   | 1855371212 |
+|  3 | www.tencent.com | 2086871643 |
+|  4 | www.taobao.com  | 3207492208 |
+|  5 | www.tianmao.com | 4150936308 |
++----+-----------------+------------+
+mysql> create index crc_index on urls(crcurl);
+mysql> desc select url,crcurl from urls where crc32('www.tianmao.com')=crcurl\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: urls
+   partitions: NULL
+         type: ref
+possible_keys: crc_index
+          key: crc_index
+      key_len: 8
+          ref: const
+         rows: 1
+     filtered: 100.00
+        Extra: Using index condition
+
+	
+5、索引和排序
+	innodb插入乱序，输出有序；myisam一般来说会发生回行，但是如果没有where条件，全部取出，则不使用索引，发生filesort，影响性能
+	
+mysql> show  create table index_order\G
+*************************** 1. row ***************************
+       Table: index_order
+Create Table: CREATE TABLE `index_order` (
+  `id` int(10) unsigned NOT NULL AUTO_INCREMENT,
+  `cat_id` int(10) unsigned NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=gbk
+
+mysql> desc select * from index_order order by cat_id\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_order
+   partitions: NULL
+         type: ALL
+possible_keys: NULL
+          key: NULL
+      key_len: NULL
+          ref: NULL
+         rows: 9
+     filtered: 100.00
+        Extra: Using filesort	//	如果没有where条件，全部取出，则不使用索引，发生filesort，影响性能
+		
+mysql> desc select * from index_order where id>1 order by cat_id\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_order
+   partitions: NULL
+         type: ALL
+possible_keys: PRIMARY
+          key: NULL
+      key_len: NULL
+          ref: NULL
+         rows: 9
+     filtered: 88.89
+        Extra: Using where; Using filesort		//尽管使用了where条件，但是只能使用主键id的索引，没有使用cat_id索引，发生filesort
+
+mysql> desc select * from index_order where cat_id>2 order by cat_id\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_order
+   partitions: NULL
+         type: ALL
+possible_keys: ind_order
+          key: NULL
+      key_len: NULL
+          ref: NULL
+         rows: 9
+     filtered: 77.78
+        Extra: Using where; Using filesort		//尽管使用了cat_id索引，但是也查询id，没有索引覆盖，发生filesort
+
+mysql> desc select cat_id from index_order where cat_id>2 order by cat_id\G
+*************************** 1. row ***************************
+           id: 1
+  select_type: SIMPLE
+        table: index_order
+   partitions: NULL
+         type: range
+possible_keys: ind_order
+          key: ind_order
+      key_len: 4
+          ref: NULL
+         rows: 7
+     filtered: 100.00
+        Extra: Using where; Using index		//不出现filesort，使用cat_id，并且索引覆盖
+		
+		注意：group by和order by很耗资源，性能瓶颈，需要注意
+		
