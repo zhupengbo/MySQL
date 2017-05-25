@@ -320,3 +320,30 @@ mysql> select * from index_test;
 
 nop；执行一个什么都不做的命令，比如：alter table xx engine innodb（假设原本的引擎就是innodb）
 optimize：optimize table index_test;
+
+
+7、explain/desc各字段解释
+
+1）select_type
+simple
+primary
+	subquery（非from）
+	derived（使用from）
+	union
+	union_result
+
+2）table
+表名
+
+3）type
+all、index、range、
+ref、const、null：常量时间
+
+4）ref
+join建立连接的桥梁，即 on 
+
+5）rows
+可能搜索的行数
+
+6）extra
+index、where、temperary（用到了临时表）、filesort（用到了文件排序）
