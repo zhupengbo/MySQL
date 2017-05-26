@@ -347,3 +347,194 @@ join建立连接的桥梁，即 on
 
 6）extra
 index、where、temperary（用到了临时表）、filesort（用到了文件排序）
+
+8、in子查询的陷阱
++--------+------------------+------+-----+---------+----------------+
+| Field  | Type             | Null | Key | Default | Extra          |
++--------+------------------+------+-----+---------+----------------+
+| id     | int(10) unsigned | NO   | PRI | NULL    | auto_increment |
+| name   | char(20)         | NO   |     | NULL    |                |
+| cat_id | int(10) unsigned | NO   | MUL | NULL    |                |
++--------+------------------+------+-----+---------+----------------+
+select * from in_test as  A  where id in (select id from in_test as B where cat_id<2 );
+该语句过程和exist过程相似，取出A的所有行，然后取出A的id字段查看是否在 in 的集合中，所以效率低
+	
+9、count技巧、order by 和 group by 、union
+mysql> select count(*) from in_test;
++----------+
+| count(*) |
++----------+
+|   101007 |
++----------+
+1）count技巧
+问题：要求取出id小于100000的记录数目？
+解答：
+	a)mysql> select count(*) from in_test where id<100000;
+		+----------+
+		| count(*) |
+		+----------+
+		|    99999 |
+		+----------+
+		1 row in set (0.04 sec)//使用了0.04sec
+	b)
+	优化：由于总数目是不需要查询的，所以我们可以使用总数目-（>=100000的数目）
+	mysql> select ((select count(*) from in_test)-(select count(*) from in_test where id>=100000));
+		+----------------------------------------------------------------------------------+
+		| ((select count(*) from in_test)-(select count(*) from in_test where id>=100000)) |
+		+----------------------------------------------------------------------------------+
+		|                                                                            99999 |
+		+----------------------------------------------------------------------------------+
+		1 row in set (0.02 sec)//使用了0.02sec
+	
+2）order by 和 group by 字段应该一致
+
+3）union 自动去重功能，去重就需要排序，排序耗时；使用 union all 不去重，速度快
+
+10、limit 
+
+limit offset，Nfu'ga；//执行过程是，将前offset+N的所以记录都取出，然后丢弃前offset条记录，所以当offset越大，查询速度越慢
+
+为演示效果，使用过程往数据库添加100,0000条数据
+mysql> create function mc() 
+    -> returns int
+    -> begin
+    -> return(select count(*) from in_test);
+    -> end//
+mysql> select mc();
++---------+
+| mc()    |
++---------+
+| 1101008 |
++---------+
+show profiles;
++----------+------------+---------------------------------------+
+| Query_ID | Duration   | Query                                 |
++----------+------------+---------------------------------------+
+|        1 | 0.00014525 | set profile=1                         |
+|        2 | 0.00044050 | select @@profiling                    |
+|        3 | 0.29643375 | select * from in_test limit 1100000,2 |
+|        4 | 0.00135025 | select * from in_test limit 1000,2    |
++----------+------------+---------------------------------------+
+可以看到随着offset的增大，查询时间也在增大
+优化：
+	1）业务上限制不能跳页太大
+	2）如果id没有空洞，使用where
+	3）索引覆盖+延迟关联
+	mysql> show profiles;
++----------+------------+--------------------------------------------------------------------------------------------+
+| Query_ID | Duration   | Query                                                                                      |
++----------+------------+--------------------------------------------------------------------------------------------+
+|        1 | 0.00014525 | set profile=1                                                                              |
+|        2 | 0.00044050 | select @@profiling                                                                         |
+|        3 | 0.29643375 | select * from in_test limit 1100000,2                                                      |
+|        4 | 0.00135025 | select * from in_test limit 1000,2                                                         |
+|        5 | 0.35008925 | select * from (select id from in_test limit 1100000,2) as A join in_test as B on A.id=B.id |
+|        6 | 0.21167925 | select id from in_test limit 1100000,2                                                     |
+|        7 | 0.00096775 | select * from (select id from in_test limit 1000,2) as A join in_test as B on A.id=B.id    |
+|        8 | 0.22017325 | select * from (select id from in_test limit 1100000,2) as A join in_test as B on A.id=B.id |
+|        9 | 0.20570225 | select id from in_test limit 1100000,2                                                     |
+|       10 | 0.21727050 | select * from (select id from in_test limit 1100000,2) as A join in_test as B on A.id=B.id |
++----------+------------+--------------------------------------------------------------------------------------------+
+Query_ID 10并没有比9的查询速度更高？
+
+11、profile使用
+用来查看内存、cpu等状态，使用了底层函数，只有unix系统可用
+默认关闭，查看是否打开
+mysql> select @@profiling;
++-------------+
+| @@profiling |
++-------------+
+|           0 |
++-------------+
+打开
+mysql> set profiling=1;
+mysql> select @@profiling;
++-------------+
+| @@profiling |
++-------------+
+|           1 |
++-------------+
+查看最近所有的执行
+mysql> show profiles;
++----------+------------+--------------------------+
+| Query_ID | Duration   | Query                    |
++----------+------------+--------------------------+
+|        1 | 0.00022750 | select @@profiling       |
+|        2 | 5.86106925 | select * from in_test    |
+|        3 | 0.06070300 | select * from index_test |
++----------+------------+--------------------------+
+查看最近一次的执行的详情
+mysql> show profile;
++----------------------+----------+
+| Status               | Duration |
++----------------------+----------+
+| starting             | 0.000059 |
+| checking permissions | 0.000011 |
+| Opening tables       | 0.000015 |
+| init                 | 0.000017 |
+| System lock          | 0.000010 |
+| optimizing           | 0.000006 |
+| statistics           | 0.000018 |
+| preparing            | 0.000015 |
+| executing            | 0.000004 |
+| Sending data         | 0.038250 |
+| end                  | 0.000016 |
+| query end            | 0.000010 |
+| closing tables       | 0.000009 |
+| freeing items        | 0.000043 |
+| cleaning up          | 0.022222 |te
++----------------------+----------+
+查看特定查询，比如query_id=3的执行
+mysql> show profile for query 3;
++----------------------+----------+
+| Status               | Duration |
++----------------------+----------+
+| starting             | 0.000059 |
+| checking permissions | 0.000011 |
+| Opening tables       | 0.000015 |
+| init                 | 0.000017 |
+| System lock          | 0.000010 |
+| optimizing           | 0.000006 |
+| statistics           | 0.000018 |
+| preparing            | 0.000015 |
+| executing            | 0.000004 |
+| Sending data         | 0.038250 |
+| end                  | 0.000016 |
+| query end            | 0.000010 |
+| closing tables       | 0.000009 |
+| freeing items        | 0.000043 |
+| cleaning up          | 0.022222 |
++----------------------+----------+
+
+12、创建函数
+	定义：
+	dilimiter $$
+	create function f()	//括号必不可少
+	returns date	//returns必不可少
+	begin
+	return(select now());
+	end$$
+	dilimiter ;
+	使用：
+	select f();
+	删除
+	drop function f;//不能是drop function f();
+
+13、创建过程
+	定义：
+	dilimiter //
+	create procedure f1(in N int)
+    begin
+    declare i int;
+    set i=0;
+    while i<= N do
+    insert into in_test values(null,'xxx',i);
+    set i=i+1;
+    end while;
+    end//
+	dilimiter ;
+	使用：
+	call f1(100000);
+	删除：
+	drop procedure f1; //不要有()
+	
