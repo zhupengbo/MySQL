@@ -400,12 +400,12 @@ mysql> create function mc()
     -> begin
     -> return(select count(*) from in_test);
     -> end//
-mysql> select mc();
-+---------+
-| mc()    |
-+---------+
-| 1101008 |
-+---------+
+mysql> select  mc();
++----------+
+| mc()     |
++----------+
+| 11101009 |
++----------+
 show profiles;
 +----------+------------+---------------------------------------+
 | Query_ID | Duration   | Query                                 |
@@ -421,21 +421,15 @@ show profiles;
 	2）如果id没有空洞，使用where
 	3）索引覆盖+延迟关联
 	mysql> show profiles;
-+----------+------------+--------------------------------------------------------------------------------------------+
-| Query_ID | Duration   | Query                                                                                      |
-+----------+------------+--------------------------------------------------------------------------------------------+
-|        1 | 0.00014525 | set profile=1                                                                              |
-|        2 | 0.00044050 | select @@profiling                                                                         |
-|        3 | 0.29643375 | select * from in_test limit 1100000,2                                                      |
-|        4 | 0.00135025 | select * from in_test limit 1000,2                                                         |
-|        5 | 0.35008925 | select * from (select id from in_test limit 1100000,2) as A join in_test as B on A.id=B.id |
-|        6 | 0.21167925 | select id from in_test limit 1100000,2                                                     |
-|        7 | 0.00096775 | select * from (select id from in_test limit 1000,2) as A join in_test as B on A.id=B.id    |
-|        8 | 0.22017325 | select * from (select id from in_test limit 1100000,2) as A join in_test as B on A.id=B.id |
-|        9 | 0.20570225 | select id from in_test limit 1100000,2                                                     |
-|       10 | 0.21727050 | select * from (select id from in_test limit 1100000,2) as A join in_test as B on A.id=B.id |
-+----------+------------+--------------------------------------------------------------------------------------------+
-Query_ID 10并没有比9的查询速度更高？
++----------+-------------+---------------------------------------------------------------------------------------------+
+| Query_ID | Duration    | Query                                                                                       |
++----------+-------------+---------------------------------------------------------------------------------------------+
+|        1 | 92.07194500 | select * from in_test limit 10000000,2                                                      |
+|        2 |  2.19709375 | select * from (select id from in_test limit 10000000,2) as A join in_test as B on A.id=B.id |
+|        3 |  0.00011875 | show frofiles                                                                               |
++----------+-------------+---------------------------------------------------------------------------------------------+
+// 2 使用了id的索引，然后内连接，查询速度提升
+
 
 11、profile使用
 用来查看内存、cpu等状态，使用了底层函数，只有unix系统可用
